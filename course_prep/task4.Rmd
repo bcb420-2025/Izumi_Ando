@@ -1,5 +1,5 @@
 ---
-title: "Task 4 : R Notebook"
+title: "Task 4 : Examining R packages"
 output: html_notebook
 ---
 
@@ -12,7 +12,7 @@ The following lists the R packages currently attached/loaded to this session.
 ```{r}
 search()
 ```
-The following opens up the vignette for how to use the `vignette` function.
+The following opens up the help page for how to use the `vignette` function.
 ```{r}
 ?vignette
 ```
@@ -20,6 +20,11 @@ The following opens up the vignette for how to use the `vignette` function.
 Installing the `seqinr` package.
 ```{r}
 install.packages("seqinr",repos="https://cran.rstudio.com/")
+
+# code below is a good way to avoid producing errors when a package has not been installed 
+# if (! requireNamespace("seqinr", quietly=TRUE)) {
+#   install.packages("seqinr")
+# }
 ```
 
 Loading and examining the package.
@@ -29,9 +34,80 @@ library(help="seqinr") # pulls up information about the package
 ls("package:seqinr") # lists all functions available in this package
 ```
 
-
+The command below pulls up the help page for the function `a`.
+It seems like it converts three letter amino-acid codes into their single letter expression.
 ```{r}
-library(seqinr)
-library(help="seqinr") # pulls up information about the package
-ls("package:seqinr") # lists all functions available in this package
+?seqinr::a
+```
+
+Testing out the function for Tyrosine. Looks about right!
+```{r}
+seqinr::a("Tyr")
+```
+
+Testing the `words` function.
+It returned all possible combinations permutations of the items in the input vector of length 3.
+```{r}
+seqinr::words(3, c("A", "G", "C", "U"))
+```
+
+The command below pulled up the help page for the `data` function provided in `utils`.
+It seems like it loads specified datasets OR lists any that are available.
+```{r}
+?data
+```
+
+Checking what data sets are available in the `seqinr` package.
+```{r}
+data(package="seqinr")
+```
+
+Loading one of the data sets provided in `seqinr` called `aaindex`.
+```{r}
+data(aaindex, package="seqinr")   
+```
+
+Pulling up the help documentation for the `aaindex` data set.
+Seems like a list of the physicochemical & biological properties of the 20 AAs.
+It is a list of 544 elements, indexed by aaindex accession number.
+Seems very organized and thorough!
+```{r}
+?aaindex
+```
+
+Examining some indices...
+```{r}
+aaindex$FASG890101
+aaindex$PONJ960101
+```
+Plotting the data. 
+```{r}
+plot(aaindex$FASG890101$I, # setting x values to be hydrophobicity
+     aaindex$PONJ960101$I, # setting y values to be volume
+     xlab="hydrophobicity", ylab="volume", type="n")
+text(aaindex$FASG890101$I,
+     aaindex$PONJ960101$I,
+     labels=a(names(aaindex$FASG890101$I))) # letting labels be the single letter AA expression using the function a
+```
+
+Exploring some plotting code provided.
+Read through each function's documentation to understand what is going on. (annotations in comments)
+```{r}
+seqinr::choosebank("swissprot") # creates connection to remote database
+mySeq <- seqinr::query("mySeq", "N=MBP1_YEAST") # getting list of seq names from ACNUC : args are 1) name of list and 2) seqname (ID/locus using N tag)
+mbp1 <- seqinr::getSequence(mySeq) # getting sequence from the qaw object returned by function query, returns a vector of single, upper case characters
+seqinr::closebank() # closing connection
+x <- seqinr::AAstat(mbp1[[1]]) # getting protein seq information using a protein seq, composistion (count) and properties, ALSO plots presence of residues based on character bc plot argument is set to TRUE by default (colorful plot)
+barplot(sort(x$Compo), cex.names = 0.6) # plotting the count of each residue
+```
+
+The `sos` package is helpful in finding R packages.
+```{r}
+if (! requireNamespace("sos", quietly=TRUE)) {
+    install.packages("sos")
+}
+library(help = sos)       # basic information
+browseVignettes("sos")    # available vignettes
+ 
+sos::findFn("moving average") # looks for functions related to query "moving average"
 ```
