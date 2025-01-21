@@ -1,0 +1,37 @@
+---
+title: "Task 4 : R Notebook"
+output: html_notebook
+---
+
+The following lists the R packages available in this machine with one line descriptions.
+```{r}
+library()
+```
+
+The following lists the R packages currently attached/loaded to this session.
+```{r}
+search()
+```
+The following opens up the vignette for how to use the `vignette` function.
+```{r}
+?vignette
+```
+
+Installing the `seqinr` package.
+```{r}
+install.packages("seqinr",repos="https://cran.rstudio.com/")
+```
+
+Loading and examining the package.
+```{r}
+library(seqinr)
+library(help="seqinr") # pulls up information about the package
+ls("package:seqinr") # lists all functions available in this package
+```
+
+
+```{r}
+library(seqinr)
+library(help="seqinr") # pulls up information about the package
+ls("package:seqinr") # lists all functions available in this package
+```
