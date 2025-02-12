@@ -1,0 +1,419 @@
+---
+title: "BCB420 A1"
+author: "Izumi Ando"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+bibliography: ref.bib
+csl: apa-6th-edition.csl
+link-citations: TRUE
+---
+
+# 1- Dataset Overview
+
+The dataset I selected is called "SF3B1 promotes glycolysis and tumor malignancy through splicing-independent activation of HIF1α [RNA-Seq]" (GEO accession: GSE201427). The dataset along with its publication in Cell was published in 2022. The main publication focuses on understand the role of splicing factor SF3B1 in tumor progression. The dataset I selected is bulk RNA sequencing data of three human Panc-1 cell line samples that were treated with control siRNA and three samples that were treated with SF3B1 targeting siRNA (essentially a SF3B1 knockout), with all samples subject to 1% oxygen or hypoxic conditions. The study was conducted with the hypothesis that the upregulation of wild-type SF3B1 in tumors allows for adaptation to hypoxia. The main arguments for this hypothesis were the prior findings that in the heart, overexpression of SF3B1 is induced by hypoxia and that solid cancers are poorly oxygenated [@simmler2022sf3b1]. I found this experiment interesting due to the complex nature of the biologial pathway being studied. 
+
+# 2 - Downloading the Data
+
+The dataset will be downloaded from the Gene Expression Omnibus (GEO) databse using the R package `GEOquery` [@geoquery], and read into R using the `readxl` package[@readxl]  included in `tidyverse` [@tidyverse]. The bulk of the code used in this section was taken and modified from BCB420 Lecture 4 [@lec4_get_data]. A summary of the dataset is included at the bottom of this section.
+
+```{r warning=FALSE, message=FALSE}
+if (!require("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+if (!requireNamespace("GEOquery", quietly = TRUE)) {
+  BiocManager::install("GEOquery")
+}
+if (!requireNamespace("tidyverse", quietly = TRUE)) {
+  install.packages("tidyverse")
+}
+if (!requireNamespace("readxl", quietly = TRUE)) {
+  install.packages("readxl")
+}
+
+library("GEOquery")
+library("tidyverse")
+library("readxl") 
+```
+
+```{r warning=FALSE, message=FALSE}
+# getting the GEO description
+geo_id <- "GSE201427"
+gse <- GEOquery::getGEO(geo_id, GSEMatrix=FALSE)
+supp_files <- GEOquery::getGEOSuppFiles(geo_id, fetch_files=FALSE)
+
+# we can see that there is only one file available (from the env tab)
+data_file <- supp_files$fname[1]
+
+# only downloading dataset if it is not available
+dir <- file.path(getwd())
+data_file_path <- file.path(dir, geo_id, data_file)
+if(!file.exists(data_file_path)){
+  data_file_download <- GEOquery::getGEOSuppFiles(geo_id, 
+                                                filter_regex = data_file, 
+                                                baseDir = dir, 
+                                                fetch_files = TRUE)
+}
+
+# reading in the data 
+panc1_data <- readxl::read_xlsx(data_file_path) 
+```
+
+### Information About the Series (GSE)
+
+Title: `r gse@header$title`\
+GEO Accession: `r gse@header$geo_accession`\
+Submission Date: `r gse@header$submission_date`\
+Last Update: `r gse@header$last_update_date`\
+Platform: Illumina HiSeq 4000 (Homo sapiens)
+Associated Publication PubMed ID: `r gse@header$pubmed_id` Contact Information:\
+   Contact Name: `r gse@header$contact_name`\
+   Contact Institute: `r gse@header$contact_institute`\
+   Contact Name: `r gse@header$contact_email`
+
+# 3 - Assessing the Data
+
+### Statistics About the Dataset
+
+**Number of rows:** `r nrow(panc1_data)`\
+**Number of Entrez IDs:** `r nrow(panc1_data) - nrow(panc1_data[panc1_data$EntrezID == "NA", ])`\
+**Number of Gene Names:** `r nrow(panc1_data) - nrow(panc1_data[panc1_data$Gene == "NA", ])`
+
+### Other points to note:
+
+-   The sample labels (column names) are formatted the the following way "A_NUM_Panc1_EXP_O2" where NUM is the sample number, EXP is the experiment group either control siRNA (siCtrl) or SF3B1 targeting siRNA (siSF3B1), and O2 is the oxygen level (Hx for hypoxia or 1%, and Nx for normoxia or 21%). The original data file seems to only include 8 samples although the GSE201427 description states that there are 9. However, the missing sample seems to be **A_7_Panc1_siCtrl_Nx** which is not part of the experiment I will be focusing on so it is not an issue.
+-   The values in the dataset is already in **log2-CPM**. This was noted by the fact that 1) the data file has "CPM" in the title, 2) there are negative values, and 3) when I reverse calculated the sum of the $\frac{\text{Raw Count}}{\text{Total Reads in Sample}}$ for each column, it only made sense that it could be a log of base 2. The calculations for one column are included below.
+
+```{r warning=FALSE, message=FALSE}
+b10<- sum((10^panc1_data$"A-1_Panc1_siCtrl_Nx") / 1000000)
+b2<- sum((2^panc1_data$"A-1_Panc1_siCtrl_Nx") / 1000000)
+
+cat("If we assume it is log base 10, the sum of the raw counts over total reads 
+    would be", b10, "but if we assume log base 2 it would be", b2)
+```
+
+A glance at the data.
+```{r warning=FALSE, message=FALSE}
+library("knitr")
+
+# printing out the first 3 rows of the data
+knitr::kable(head(panc1_data, 3), format = "html", align = "c")
+```
+
+Here we organize the groupings of the samples in the dataset.
+```{r warning=FALSE, message=FALSE}
+# modified code from lecture 4 get the data 
+list_of_samples <- gse@gsms
+samples_type <- do.call(rbind, 
+                        lapply(list_of_samples,
+                               FUN = function(x){c(x@header$title, 
+                                                   x@header$characteristics_ch1)
+                                 }))
+colnames(samples_type) <- c("Sample Name", "Oxygen Exposure", 
+                            "siRNA Treatment", "Cell Line")
+
+samples_type[, "Oxygen Exposure"] <- gsub(samples_type[, "Oxygen Exposure"],
+                                          pattern = "condition: ",
+                                          replacement = "")
+
+samples_type[, "siRNA Treatment"] <- gsub(samples_type[, "siRNA Treatment"],
+                                          pattern = "treatment: ",
+                                          replacement = "")
+
+samples_type[, "Cell Line"] <- gsub(samples_type[, "Cell Line"],
+                                          pattern = "cell line: ",
+                                          replacement = "")
+
+samples_type <- as.data.frame(samples_type)
+
+knitr::kable(samples_type, format = "html", align = "c")
+```
+
+### Plotting the Data
+
+Here I plotted the density plot and box plot of the unfiltered data. The code is mostly taken from BCB420 Lecture 5 [@lec5_norm].
+```{r warning=FALSE, message=FALSE}
+
+# removing extra columns for different O2 exposure levels
+panc1_data <- panc1_data[, c(1, 2, 5, 6, 7, 8, 9, 10)]
+
+# Extract only numeric data (third column onwards)
+numeric_data <- panc1_data[, 3:ncol(panc1_data)]
+
+
+# Calculate density for each sample (column-wise)
+# this data is already log cpm
+counts_density <- apply(numeric_data, 2, density)
+
+# Determine x and y limits across all samples
+xlim <- range(sapply(counts_density, function(d) d$x))
+ylim <- range(sapply(counts_density, function(d) d$y))
+
+# Assign colors to each sample
+cols <- rainbow(length(counts_density))
+ltys <- rep(1, length(counts_density))
+
+# Initialize an empty plot
+plot(counts_density[[1]], xlim=xlim, ylim=ylim, type="n",
+     xlab="log-CPM", ylab="Density",
+     main="Density Plot of log-CPM PANC-1 RNA-seq unfiltered",
+     cex.lab=0.85)
+
+# Add density curves for each sample
+for (i in 1:length(counts_density)) {
+  lines(counts_density[[i]], col=cols[i], lty=ltys[i])
+}
+
+# Add legend (using column names from numeric data)
+legend("topright",
+       legend=colnames(numeric_data),
+       col=cols, lty=ltys, cex=0.75, ncol=1,
+       border="blue", text.col="black",
+       merge=TRUE, bg="gray90")
+```
+We can see that it mostly follows a normal distribution with a bump on the side.
+
+```{r warning=FALSE, message=FALSE}
+# taken from lecture5_normalization
+# using data from box above
+boxplot(numeric_data, xlab = "Samples", ylab = "log-CPM",
+        las = 2, cex = 0.75, cex.lab = 0.75,
+        cex.axis = 0.75, main = "Box Plot of PANC-1 RNA-seq")
+
+# median for each box
+abline(h = median(apply(numeric_data, 2, median)),
+       col = "purple", lwd = 1.0, lty = "dashed")
+```
+The blox plots show that the distribution is generally equal amongst the samples.
+
+# 4 - Mapping Identifiers
+
+The initail dataset contained both EntrezIDs and HUGO gene symbols. All rows had EntrezIDs but not HUGO symbols so I attempted to map the EntrezIDs to HUGO symbols myself to see if I can increase the number of mappings. I first attempted this using the R package `biomaRt` but I could not resolve the error. Thus I tested an alternative tool, the R annotation package `org.Hs.eg.db`.
+
+```{r warning=FALSE, message=FALSE}
+if (!requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
+  install.packages("org.Hs.eg.db")
+}
+
+library("org.Hs.eg.db")
+
+# AnnotationDbi is a dependency of org.Hs.eg.db
+AnnotationDbi::keytypes(org.Hs.eg.db)
+AnnotationDbi::columns(org.Hs.eg.db)
+panc1_ids <- as.vector(panc1_data[, 1])
+panc1_ids <- as.character(unlist(panc1_ids))
+mapped <- AnnotationDbi::select(org.Hs.eg.db, keys=panc1_ids, 
+                                columns=c("ENTREZID", "SYMBOL"), 
+                                keytype = "ENTREZID")
+
+# creating a data frame with the EntrezIDs, HUGO symbols from org.Hs.eg.db, 
+# and HUGO symbols from the original dataset
+joined <- cbind(mapped, panc1_data[, 2])
+```
+
+**Number of rows without HUGO symbols after mapping with `org.Hs.eg.db`:** `r nrow(mapped[mapped$SYMBOL == "NA", ])`\
+**Number of rows without HUGO symbols in the initial dataset:** `r nrow(panc1_data[panc1_data$Gene == "NA", ])`\
+**Number of rows missing HUGO symbols in both the initial dataset and after mapping with `org.Hs.eg.db`:** `r nrow(joined[joined$Gene == "NA" & joined$SYMBOL == "NA", ])`
+
+As can be seen above, the mapping from EntrezIDs to HUGO symbols was not improved using `org.Hs.eg.db`. Thus, I decided to keep the HUGO gene symbols from the original dataset and omit any rows where the HUGO identifiers were labeled "NA".
+
+```{r warning=FALSE, message=FALSE}
+# removing all rows without hugo ids
+hugo_panc1_data <- panc1_data[panc1_data$Gene != "NA", ]
+
+# reformatting data frame
+geneCol <- hugo_panc1_data$Gene
+hugo_panc1_data <- hugo_panc1_data[, 3:length(hugo_panc1_data)] # removing extra gene identifier columns
+rownames(hugo_panc1_data) <- geneCol # assigning HUGO symbols as the row names
+```
+
+# 5 - Cleaning Data
+```{r warning=FALSE, message=FALSE}
+# code taken from lecture 5 normalizing our dataset
+min_num_samples <- 3
+# removing log from data values
+cpm_non_log <- 2^hugo_panc1_data
+data_matrix <- as.matrix(cpm_non_log)
+keep <- rowSums(data_matrix > 1) > min_num_samples
+
+filtered_panc1_data <- as.data.frame(data_matrix[keep,])
+filtered_panc1_data <- log(filtered_panc1_data, base = 2) # back to log2-CPM
+
+rem_rows <- nrow(hugo_panc1_data) - nrow(filtered_panc1_data)
+cat(rem_rows, "rows were removed in this step")
+```
+
+**Plotting the density to see the impact it has on the dataset**
+
+```{r warning=FALSE, message=FALSE}
+# Calculate density for each sample (column-wise)
+#counts_density <- apply(log2(numeric_data), 2, density)
+# realized this data is already log cpm
+counts_density <- apply(filtered_panc1_data, 2, density)
+
+# Determine x and y limits across all samples
+xlim <- range(sapply(counts_density, function(d) d$x))
+ylim <- range(sapply(counts_density, function(d) d$y))
+
+# Assign colors to each sample
+cols <- rainbow(length(counts_density))
+ltys <- rep(1, length(counts_density))
+
+# Initialize an empty plot
+plot(counts_density[[1]], xlim=xlim, ylim=ylim, type="n",
+     xlab="log-CPM", ylab="Density",
+     main="Density Plot of log-CPM in filtered PANC-1 RNA-seq",
+     cex.lab=0.85)
+
+# Add density curves for each sample
+for (i in 1:length(counts_density)) {
+  lines(counts_density[[i]], col=cols[i], lty=ltys[i])
+}
+
+# Add legend (using column names from numeric data)
+legend("topright",
+       legend=colnames(numeric_data),
+       col=cols, lty=ltys, cex=0.75, ncol=1,
+       border="blue", text.col="black",
+       merge=TRUE, bg="gray90")
+
+```
+
+# 6 - Normalizing the Data
+
+As mentioned earlier, the original dataset came in log2-CPM normalized format. However, log2-CPM normalization is not ideal for differential expresison analysis, especially compared to Trimmed Mean of M-values (TMM) or DESeq2 Size Factors [@evans2018selecting]. Thus, I decided to examine the separation and dispersion of my data in its original log2-CPM normalized form and in TMM normalized form to see if there is a significant difference. I computed the TMM using `edgeR [@robinson2010edger].
+
+## log2CPM (Original Data)
+
+```{r}
+group_assignment <- samples_type$"siRNA Treatment"[3:length(samples_type$"siRNA Treatment")]
+
+limma::plotMDS(filtered_panc1_data, labels=NULL, pch=1,
+               col = c("turquoise", "purple")[factor(group_assignment)])
+
+legend("top", legend=levels(factor(group_assignment)), pch=c(1), col=c("turquoise", "purple"), title="Class", bty="n", cex=0.75)
+```
+
+## TMM
+```{r}
+# find read depths for all samples
+gsm_accession <- gse@header$sample_id[3:length(gse@header$sample_id)]
+srr_accession <- c("SRR18910178", 
+                   "SRR18910177",
+                   "SRR18910176",
+                   "SRR18910175",
+                   "SRR18910174",
+                   "SRR18910173")
+rd <- c(26644141, 
+        25605704,
+        27703630,
+        27589690,
+        29387569,
+        25360887)
+read_depths <- cbind(gsm_accession, srr_accession, rd)
+sample_name <- samples_type$`Sample Name`[3:length(samples_type$`Sample Name`)]
+rownames(read_depths) <- sample_name
+read_depths <- as.data.frame(read_depths)
+read_depths$rd <- as.numeric(read_depths$rd)
+
+knitr::kable(read_depths, format = "html", align = "c")
+
+# The read counts were taken from the links below in order.
+# https://trace.ncbi.nlm.nih.gov/Traces/index.html?view=run_browser&page_size=10&acc=SRR18910178&display=metadata
+# https://trace.ncbi.nlm.nih.gov/Traces/index.html?view=run_browser&acc=SRR18910177&display=metadata
+# https://trace.ncbi.nlm.nih.gov/Traces/index.html?view=run_browser&acc=SRR18910176&display=metadata
+# https://trace.ncbi.nlm.nih.gov/Traces/index.html?view=run_browser&acc=SRR18910175&display=metadata
+# https://trace.ncbi.nlm.nih.gov/Traces/index.html?view=run_browser&page_size=10&acc=SRR18910174&display=metadata
+# https://trace.ncbi.nlm.nih.gov/Traces/index.html?view=run_browser&page_size=10&acc=SRR18910173&display=metadata
+
+```
+![Screenshot of SRA page displaying read depth](images/SRA_screenshot.png)
+**Figure #: Screenshot of the NCBI SRA page that displays the read depth for an experiment**
+Link to page: https://trace.ncbi.nlm.nih.gov/Traces/index.html?view=run_browser&page_size=10&acc=SRR18910173&display=reads
+
+
+```{r}
+# calculate the raw counts, power of 2, subtract 1, divide by full read depth
+raw_panc1_data <- as.data.frame(2^filtered_panc1_data )
+
+for(i in 1:length(sample_name)){
+  sample <- sample_name[i]
+  rd_value <- read_depths[rownames(read_depths) == sample, "rd"]
+  raw_panc1_data[[sample]] <- raw_panc1_data[[sample]] * rd_value / 10^6
+}
+
+# the sums do not look right but you can come back to this
+
+# apply edgeR normalization
+# plot
+```
+
+```{r}
+# apply edgeR normalization
+library("edgeR")
+
+# code taken from lecture 5 normalizing our dataset
+d <- edgeR::DGEList(counts=raw_panc1_data, group=group_assignment)
+d <- edgeR::calcNormFactors(d)
+normalized_counts <- cpm(d)
+
+log_new <- log(normalized_counts, base = 2)
+
+# Calculate density for each sample (column-wise)
+#counts_density <- apply(log2(numeric_data), 2, density)
+
+counts_density <- apply(log_new, 2, density)
+
+# Determine x and y limits across all samples
+xlim <- range(sapply(counts_density, function(d) d$x))
+ylim <- range(sapply(counts_density, function(d) d$y))
+
+# Assign colors to each sample
+cols <- rainbow(length(counts_density))
+ltys <- rep(1, length(counts_density))
+
+# Initialize an empty plot
+plot(counts_density[[1]], xlim=xlim, ylim=ylim, type="n",
+     xlab="log-CPM", ylab="Density",
+     main="Density Plot of TMM normalized PANC-1 RNA-seq",
+     cex.lab=0.85)
+
+# Add density curves for each sample
+for (i in 1:length(counts_density)) {
+  lines(counts_density[[i]], col=cols[i], lty=ltys[i])
+}
+
+# Add legend (using column names from numeric data)
+legend("topright",
+       legend=colnames(numeric_data),
+       col=cols, lty=ltys, cex=0.75, ncol=1,
+       border="blue", text.col="black",
+       merge=TRUE, bg="gray90")
+
+###########
+
+# taken from lecture5_normalization
+# using data from box above
+boxplot(log_new, ylab = "log-CPM",
+        las = 2, cex = 0.75, cex.lab = 0.75,
+        cex.axis = 0.75, main = "Box Plot of PANC-1 RNA-seq")
+
+# median for each box
+abline(h = median(apply(log_new, 2, median)),
+       col = "purple", lwd = 1.0, lty = "dashed")
+```
+
+```{r}
+limma::plotMDS(d, labels=NULL, pch=1,
+               col = c("turquoise", "purple")[factor(group_assignment)])
+
+legend("top", legend=levels(factor(group_assignment)), pch=c(1), col=c("turquoise", "purple"), title="Class", bty="n", cex=0.75)
+```
+
+# 7 - Final Data
+Below is the final, formatted data frame of this process with TMM normalized counts, 6 columns, and HUGO symbols as row names.
+```{r}
+head(normalized_counts, 5)
+```
