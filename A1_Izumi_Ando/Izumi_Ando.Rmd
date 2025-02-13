@@ -225,7 +225,7 @@ The initail dataset contained both EntrezIDs and HUGO gene symbols. All rows had
 
 ```{r warning=FALSE, message=FALSE}
 if (!requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
-  install.packages("org.Hs.eg.db")
+  BiocManager::install("org.Hs.eg.db")
 }
 
 library("org.Hs.eg.db")
