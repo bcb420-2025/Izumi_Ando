@@ -1,0 +1,20 @@
+---
+title: "BCB420 A2"
+author: "Izumi Ando"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+bibliography: ./A2_files/ref.bib
+csl: apa-6th-edition.csl
+link-citations: TRUE
+---
+
+# 1 - Dataset Overview
+
+# 2 - Differential Gene Expression Analysis
+
+# 3 - Thresholded Over-Representation Analysis
+
+# 4 - Conclusions
