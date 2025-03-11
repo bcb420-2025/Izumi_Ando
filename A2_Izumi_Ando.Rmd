@@ -7,14 +7,379 @@ output:
     toc: true
     toc_depth: 2
 bibliography: ./A2_files/ref.bib
-csl: apa-6th-edition.csl
+csl: ./A2_files/apa-6th-edition.csl
 link-citations: TRUE
 ---
+# 0 - Environment Set Up
+Before we begin, we will install any packages not already provided in the environment and load all necessary libraries used in this analysis. The packages are cited in each section they are used. 
+```{r warning=FALSE, message=FALSE}
+if (!require("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+if (!requireNamespace("GEOquery", quietly = TRUE)) {
+  BiocManager::install("GEOquery")
+}
+if (!requireNamespace("tidyverse", quietly = TRUE)) {
+  install.packages("tidyverse")
+} # readxl included in tidyverse install
+if (!require("knitr", quietly = TRUE)) {
+  install.packages("knitr")
+}
+if (!requireNamespace("edgeR", quietly = TRUE)) {
+  install.packages("edgeR")
+}
+if (!requireNamespace("ComplexHeatmap", quietly = TRUE)) {
+  install.packages("ComplexHeatmap")
+}
+if (!requireNamespace("circlize", quietly = TRUE)) {
+  install.packages("circlize")
+}
+
+# 1 - DATASET OVERVIEW
+library("GEOquery") # to download dataset
+library("tidyverse")
+library("readxl")  # to read the datafile
+library("knitr") # to produce visually cleaner tables
+library("edgeR") # for TMM normalization & differential expression analysis
+
+# 2 - DIFFERENTIAL GENE EXPRESSION ANALYSIS
+library("ComplexHeatmap") # to create heatmaps
+library("circlize") # to adjust heatmaps
+```
 
 # 1 - Dataset Overview
 
+**About the Dataset**       
+The dataset I selected is called “SF3B1 promotes glycolysis and tumor malignancy through splicing-independent activation of HIF1α [RNA-Seq]” (GEO accession: GSE201427). this dataset was published as a part of a Cell publication understanding the role of splicing factor SF3B1 in tumor progression. Although the full study contained multiple datasets, I narrowed down to the bulk RNA sequencing dataset with 3 samples of Panc-1 cell line samples treated with control siRNA, and 3 samples of the same cell types treated with SF3B1 targeting siRNA. SF3B1 is a splicing factor hypothesized to be a contributor to a tumor's adaptation to hypoxia, or low oxygen environments [@simmler2022sf3b1]. 
+
+**Overview of this Section**
+Below are the series of steps I followed in the previous assignment to download, clean, and normalize (Trimmed Mean of M-values (TMM)) the dataset. The code blocks will be preceded by short summaries of what was done in the process. 
+
+### Loading in the data
+I downloaded the dataset from Gene Expression Omnibus (GEO) databse using the R package `GEOquery` [@geoquery], and read in the data file using `readxl` [@readxl] which is included in the `tidyverse` package [@tidyverse]. The data files included two extra samples which I did not include in my analysis (given that there was a minimum requirement for sample numbers and we could not have more than two experimental groups). By the end of these code blocks we have our starting dataset only including the samples of interest along with a data frame characterizing each sample. The output of the code blocks will show 1) a glance of what the data looks like at this stage (Table 1) and 2) a table of the characteristics of each sample (Table 2). The section immediately after the code block are short descriptions of the dataset (also known as series) and the platform used to generate it. Most of this code was adapted from the lecture slides for BCB420 Lecture 4 "Get the Data" [@lec4_get_data]. 
+```{r warning=FALSE, message=FALSE}
+# code adapted from BCB420 Lecture 4 Get the Data
+
+##### PART 1 - Downloading the data
+# getting the GEO description
+geo_id <- "GSE201427"
+gse <- GEOquery::getGEO(geo_id, GSEMatrix=FALSE)
+supp_files <- GEOquery::getGEOSuppFiles(geo_id, fetch_files=FALSE)
+
+# getting information about GPL
+gpl_name <- names(GEOquery::GPLList(gse))[1]
+gpl <- GEOquery::Meta(GEOquery::getGEO(gpl_name))
+
+# getting the data file name (there is only one file for this dataset)
+data_file <- supp_files$fname[1]
+
+# only downloading dataset if it is not available locally
+dir <- file.path(getwd())
+data_file_path <- file.path(dir, geo_id, data_file)
+if(!file.exists(data_file_path)){
+  data_file_download <- GEOquery::getGEOSuppFiles(geo_id, 
+                                                filter_regex = data_file, 
+                                                baseDir = dir, 
+                                                fetch_files = TRUE)
+}
+
+# reading in the data 
+panc1_data <- readxl::read_xlsx(data_file_path) 
+
+# Removing extra columns for different O2 exposure levels
+panc1_data <- panc1_data[, c(1, 2, 5, 6, 7, 8, 9, 10)]
+
+# Extract only numeric data (third column onwards)
+numeric_data <- panc1_data[, 3:ncol(panc1_data)]
+
+# printing the first few rows of the data
+knitr::kable(head(panc1_data, 3), 
+             format = "html", 
+             align = "c", 
+             caption = "Table 1: A glance at the current state of the data")
+
+##### PART 2 - Characterizing the Samples
+list_of_samples <- gse@gsms
+samples_type <- do.call(rbind, 
+                        lapply(list_of_samples,
+                               FUN = function(x){c(x@header$title, 
+                                                   x@header$characteristics_ch1)
+                                 }))
+colnames(samples_type) <- c("Sample Name", "Oxygen Exposure", 
+                            "siRNA Treatment", "Cell Line")
+
+samples_type[, "Oxygen Exposure"] <- gsub(samples_type[, "Oxygen Exposure"],
+                                          pattern = "condition: ",
+                                          replacement = "")
+
+samples_type[, "siRNA Treatment"] <- gsub(samples_type[, "siRNA Treatment"],
+                                          pattern = "treatment: ",
+                                          replacement = "")
+
+samples_type[, "Cell Line"] <- gsub(samples_type[, "Cell Line"],
+                                          pattern = "cell line: ",
+                                          replacement = "")
+
+samples_type <- as.data.frame(samples_type)
+
+# removing the samples not used in the analysis
+samples_type_mod <- samples_type[-c(1, 2),]
+
+# printing the sample description table
+knitr::kable(samples_type_mod, 
+             format = "html", 
+             align = "c",
+             caption = "Table 2: Sample Descriptions")
+```
+#### Information About the Series (GSE)
+
+**Title:** `r gse@header$title`\
+**GEO Accession:** `r gse@header$geo_accession`\
+**Submission Date:** `r gse@header$submission_date`\
+**Last Update:** `r gse@header$last_update_date`\
+**Associated Publication PubMed ID:** `r gse@header$pubmed_id`\ 
+**Contact Information:**\
+   **Contact Name:** `r gse@header$contact_name`\
+   **Contact Institute:** `r gse@header$contact_institute`\
+   **Contact Name:** `r gse@header$contact_email`
+
+#### Information About the Platform (GPL)
+
+**Platform Name:** `r gpl$title`\
+**GEO Accession:** `r gpl$geo_accession`\
+**Number of Associated Samples on Geo:** `r length(gpl$sample_id)`\
+
+### Cleaning the Data
+After downloading the data, I cleaned the data based on three conditions. 1) Whether it had an associated HUGO gene symbol, 2) whether it had at least a count above 1 CPM in at least half of the samples, and 3) whether it had duplicates (there were none). The output of this code block will show the number of rows removed in this process. I have omitted the code for gene symbol mapping as I ended up using the original gene symbol mappings in the previous assignment because the re-mapping did not increase any new ones. Part of this code is adapted from BCB420 Lecture 5 "Normalizing Our Dataset" [@lec5_norm_data].
+
+```{r warning=FALSE, message=FALSE}
+##### PART 1 - removing rows without HUGO gene symbols
+
+# removing all rows without hugo symbols
+hugo_panc1_data <- panc1_data[panc1_data$Gene != "NA", ]
+
+# reformatting data frame
+geneCol <- hugo_panc1_data$Gene
+# removing extra gene identifier columns
+hugo_panc1_data <- hugo_panc1_data[, 3:length(hugo_panc1_data)]
+# assigning HUGO symbols as the row names
+rownames(hugo_panc1_data) <- geneCol
+
+##### PART 2 - removing low counts
+
+# code adapted from Lecture 5 Normalizing Our Dataset
+# the min number of samples is three because the total number of samples is 6
+min_num_samples <- 3
+# removing log from data values as it is already in CPM form
+cpm_non_log <- 2^hugo_panc1_data
+data_matrix <- as.matrix(cpm_non_log)
+keep <- rowSums(data_matrix > 1) > min_num_samples
+
+filtered_panc1_data <- as.data.frame(data_matrix[keep,])
+filtered_panc1_data <- log(filtered_panc1_data, base = 2) # back to log2-CPM
+
+rem_rows <- nrow(hugo_panc1_data) - nrow(filtered_panc1_data)
+
+##### PART 3 - removing duplicate rows
+# checking for rows with the same read values by viewing data from both ends
+duplicates <- duplicated(filtered_panc1_data) | duplicated(filtered_panc1_data, 
+                                                           fromLast = TRUE)
+num_dups <- nrow(filtered_panc1_data[duplicates, ])
+
+# checking for rows with the same gene names
+# geneCol is a list of HUGO symbols from the previous section
+num_dup_genes <- length(unique(geneCol)) - length(geneCol)
+
+# no rows were removed in this step
+
+##### PART 4 - printing stats
+
+cat("The dataset started with", nrow(panc1_data), "rows, and",
+    nrow(panc1_data) - nrow(hugo_panc1_data), "rows without HUGO symbols,",
+    rem_rows, "rows with low counts,",
+    num_dups, "rows with the same read values, and",
+    num_dup_genes, "rows with duplicate gene names were removed. 
+    This leaves us with",
+    nrow(filtered_panc1_data), "rows after cleaning the data.")
+```
+
+### Normalizing the Data
+In the final step of the previous assignment, I re-normalized the read counts. For context, the original data was provided in log-CPM normalized form which is not recommended for differential expression analysis [@evans2018selecting]. Thus, I used the read depth data provided by the Sequence Read Archive (SRA) Run Selector tool [@sra_run_selector] to reverse calculate the raw counts and re-normalized it using TMM normalization. The SRR identifiers were traced from using the GEO identifier of the dataset. I adapted the code for TMM normalization from the BCB420 Lecture 5 "Normalizing Our Data" materials [@lec5_norm_data], and used the R package `edgeR` [@robinson2010edger]. 
+```{r warning=FALSE, message=FALSE}
+##### PART 1 - finding the read depths for each sample
+
+# find read depths for all samples
+gsm_accession <- gse@header$sample_id[3:length(gse@header$sample_id)]
+srr_accession <- c("SRR18910178", 
+                   "SRR18910177",
+                   "SRR18910176",
+                   "SRR18910175",
+                   "SRR18910174",
+                   "SRR18910173")
+rd <- c(26644141, 
+        25605704,
+        27703630,
+        27589690,
+        29387569,
+        25360887)
+read_depths <- cbind(gsm_accession, srr_accession, rd)
+sample_name <- samples_type$`Sample Name`[3:length(samples_type$`Sample Name`)]
+rownames(read_depths) <- sample_name
+read_depths <- as.data.frame(read_depths)
+read_depths$rd <- as.numeric(read_depths$rd)
+
+##### PART 2 - reverse calculating the raw counts from log-CPM
+
+# not subtracting by 1, as it creates negative values
+raw_panc1_data <- as.data.frame(2^filtered_panc1_data )
+
+for(i in 1:length(sample_name)){
+  sample <- sample_name[i]
+  rd_value <- read_depths[rownames(read_depths) == sample, "rd"]
+  raw_panc1_data[[sample]] <- raw_panc1_data[[sample]] * rd_value / 10^6
+}
+
+##### PART 3 - Applying TMM Normalization
+
+# code adapted from lecture 5 normalizing our dataset
+group_assignment <- samples_type$"siRNA Treatment"[3:length(samples_type$"siRNA Treatment")]
+d <- edgeR::DGEList(counts=raw_panc1_data, group=group_assignment)
+d <- edgeR::calcNormFactors(d)
+normalized_counts <- cpm(d)
+```
+
+
 # 2 - Differential Gene Expression Analysis
+
+```{r warning=FALSE, message=FALSE}
+model_design <- model.matrix(~samples_type_mod$`siRNA Treatment`)
+data <- edgeR::DGEList(counts=normalized_counts, 
+                       group=samples_type_mod$`siRNA Treatment`)
+data <- edgeR::estimateDisp(data, design=model_design)
+fit <- edgeR::glmQLFit(data, design=model_design)
+qlf.siCtrl_vs_siSF3B1 <- edgeR::glmQLFTest(fit, coef="samples_type_mod$`siRNA Treatment`siSF3B1")
+
+knitr::kable(edgeR::topTags(qlf.siCtrl_vs_siSF3B1), type="html",row.names =
+TRUE)
+
+qlf_output_hits <- topTags(qlf.siCtrl_vs_siSF3B1,
+                           sort.by = "PValue",
+                           n = nrow(normalized_counts))
+nrow(normalized_counts)
+length(which(qlf_output_hits$table$PValue < 0.05))
+
+length(which(qlf_output_hits$table$FDR < 0.05))
+```
+```{r warning=FALSE, message=FALSE}
+if (!requireNamespace("ComplexHeatmap", quietly = TRUE)) {
+  install.packages("ComplexHeatmap")
+}
+if (!requireNamespace("circlize", quietly = TRUE)) {
+  install.packages("circlize")
+}
+
+library(ComplexHeatmap)
+library(circlize)
+
+heatmap_matrix <- normalized_counts
+
+top_hits <- rownames(qlf_output_hits$table)[qlf_output_hits$table$PValue<0.05]
+heatmap_matrix_tophits <- t(scale(t(heatmap_matrix[which(rownames(heatmap_matrix)%in%top_hits),])))
+
+if(min(heatmap_matrix_tophits) == 0){
+  heatmap_col <- circlize::colorRamp2(c(0, 
+                              max(heatmap_matrix_tophits)), 
+                            c( "white", "red"))
+} else {
+  heatmap_col <- circlize::colorRamp2(c(min(heatmap_matrix_tophits), 
+                              0,
+                              max(heatmap_matrix_tophits)),
+                            c("blue", "white", "red"))
+}
+
+current_heatmap <- ComplexHeatmap::Heatmap(as.matrix(heatmap_matrix_tophits),
+                           cluster_rows = TRUE,
+                           cluster_columns = TRUE,
+                           show_row_dend = TRUE,
+                           show_column_dend = TRUE,
+                           col=heatmap_col,
+                           show_column_names = TRUE,
+                           show_row_names = FALSE,
+                           show_heatmap_legend = TRUE,
+                           column_title =("Top hits siCtrl vs siSF3B1")
+                           )
+current_heatmap
+```
+### Creating Thresholded Gene Lists
+```{r warning=FALSE, message=FALSE}
+# code adapted from Lecture 8 Preliminary ORA
+
+# CREATING A RANKED LIST
+# extracting just the hits table (identifiers are already gene names)
+qlf_output_hits_table <- qlf_output_hits$table
+qlf_output_hits_table[,"rank"] <- 
+  -log(qlf_output_hits_table$PValue,base =10)*sign(qlf_output_hits_table$logFC)
+qlf_output_hits_table <-
+qlf_output_hits_table[order(qlf_output_hits_table$rank),]
+
+# genes without gene symbols have already been removed in A1
+
+# CREATING THRESHOLDED LISTS (up and down regualted genes)
+# using FDR corrected p-values because my dataset returned 8000+ genes with
+# both PValue and FDR thresholds of 0.05
+upregulated_genes <- rownames(qlf_output_hits_table)[which(
+  qlf_output_hits_table$FDR < 0.05 & qlf_output_hits_table$logFC > 0)]
+length(upregulated_genes)
+
+downregulated_genes <- rownames(qlf_output_hits_table)[which(
+  qlf_output_hits_table$FDR < 0.05 & qlf_output_hits_table$logFC < 0)]
+length(downregulated_genes)
+```
 
 # 3 - Thresholded Over-Representation Analysis
 
-# 4 - Conclusions
+```{r warning=FALSE, message=FALSE}
+if (!requireNamespace("gprofiler2", quietly = TRUE)) {
+  install.packages("gprofiler2")
+}
+if (!requireNamespace("GSA", quietly = TRUE)) {
+  install.packages("GSA")
+}
+
+library(gprofiler2)
+library(GSA)
+
+# code taken from https://risserlin.github.io/CBW_pathways_workshop_R_notebooks/run-gprofiler-from-r.html
+
+gprofiler_upreg <- gprofiler2::gost(query = upregulated_genes,
+                          significant=FALSE, # consider changing
+                          ordered_query = FALSE,
+                          exclude_iea=TRUE,
+                          correction_method = "fdr",
+                          organism = "hsapiens",
+                          source = c("REAC","WP","GO:BP", "TF", "HPA"))
+
+gprofiler_downreg <- gprofiler2::gost(query = downregulated_genes,
+                          significant=FALSE, # consider changing
+                          ordered_query = FALSE,
+                          exclude_iea=TRUE,
+                          correction_method = "fdr",
+                          organism = "hsapiens",
+                          source = c("REAC","WP","GO:BP", "TF", "HPA"))
+
+#get the gprofiler results table
+enrichment_results_up <- gprofiler_upreg$result
+enrichment_results_down <- gprofiler_downreg$result
+    
+enrichment_results_up[1:5,]
+
+enrichment_results_down[1:5,]
+
+
+
+```
+
+
+# 4 - Interpretations & Conclusions
+
+# 5 - References
