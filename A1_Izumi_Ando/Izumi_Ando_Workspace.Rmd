@@ -1,0 +1,357 @@
+---
+title: "BCB420 A1"
+author: "Izumi Ando"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+bibligraphy: A1_references.bib
+
+---
+
+# 0 - Dataset Overview
+The dataset I selected is called "SF3B1 promotes glycolysis and tumor malignancy through splicing-independent activation of HIF1α [RNA-Seq]" (GEO accession: GSE201427).
+
+# 1 - Download the Data
+
+```{r eval=FALSE}
+# if (!require("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("GEOquery")
+```
+
+```{r}
+# getting the GEO description
+geoID <- "GSE201427"
+# figure out a way to access the cache data if available 
+gse <- GEOquery::getGEO(geoID, GSEMatrix=FALSE)
+```
+
+```{r eval=FALSE}
+library("GEOquery")
+
+# getting the GEO description
+geoID <- "GSE201427"
+# figure out a way to access the cache data if available 
+gse <- GEOquery::getGEO(geoID, GSEMatrix=FALSE)
+# gse@header$summary
+suppFiles <- GEOquery::getGEOSuppFiles(geoID, fetch_files=FALSE)
+# we can see that there is only one file available (from the env tab)
+dataFile <- suppFiles$fname[1]
+
+# only downloading dataset if it is not available
+dir <- file.path(getwd())
+dataFilePath <- file.path(dir, geoID, dataFile)
+if(!file.exists(dataFilePath)){
+  dataFileDownload <- GEOquery::getGEOSuppFiles(geoID, 
+                                                filter_regex = dataFile, 
+                                                baseDir = dir, 
+                                                fetch_files = TRUE)
+}
+
+# reading in the data
+panc1Data <- read.table(dataFilePath, header = TRUE, check.names = TRUE)
+dim(panc1Data)
+# getting issues about nul characters. it looks fine on 
+```
+
+```{r}
+# getting issues about nul characters. it looks fine on excel UI.
+# using readxl package https://readxl.tidyverse.org/reference/read_excel.html
+
+# checking if tidyverse is installed
+"tidyverse" %in% rownames(installed.packages())
+# install.packages("tidyverse") 
+library("tidyverse")
+# this package is included in tidyverse but needs to be loaded explicitly bc it is not core
+library("readxl") 
+
+panc1Data2 <- readxl::read_xlsx(dataFilePath) 
+# this worked! it seemed like xlsx has special encoding
+
+# not understanding the differences between gse, gpl. and gsm
+# https://www.bioconductor.org/packages/release/bioc/vignettes/GEOquery/inst/doc/GEOquery.html
+```
+
+### Information About the Series (GSE)
+Title: `r gse@header$title`  
+GEO Accession: `r gse@header$geo_accession`   
+Submission Date: `r gse@header$submission_date`   
+Last Update: `r gse@header$last_update_date`   
+Associated Publication PubMed ID: `r gse@header$pubmed_id`
+Contact Information:  
+&nbsp;&nbsp; Contact Name: `r gse@header$contact_name`  
+&nbsp;&nbsp; Contact Institute: `r gse@header$contact_institute`  
+&nbsp;&nbsp; Contact Name: `r gse@header$contact_email`  
+
+### Information About the Platform (GPL)
+
+```{r eval=FALSE}
+# seeing the distribution of the data
+# code taken from lecture5_normalization
+counts_density <- apply(log2(panc1Data2[3:8]), 2, density)
+
+xlim <- 0
+ylim <- 0
+for (i in 1:length(counts_density)){
+  xlim <- range(c(xlim, counts_density[[i]]$x))
+  ylim <- range(c(ylim, counts_density[[i]]$y))
+}
+
+cols <- rainbow(length(counts_density))
+ltys <- rep(1, length(counts_density))
+
+plot(counts_density[[1]], xlim=xlim, ylim=ylim, type="n", 
+     ylab="Smoothing density of log2-CPM",
+     main="",
+     cex.lab=0.85)
+for (i in 1:length(counts_density)){
+  lines(counts_density[[i]], col=cols[i], ltys=ltys[i])
+}
+```
+
+## 2 - Assessing the Data
+```{r}
+# THIS WORKS AND IS FORMATTED
+# MAKE SURE TO CITE THE SLIDES
+
+# removing extra columns for different O2 exposure levels
+panc1Data2_sub <- panc1Data2[, c(1, 2, 5, 6, 7, 8, 9, 10)]
+
+# Extract only numeric data (third column onwards)
+numeric_data <- panc1Data2_sub[, 3:ncol(panc1Data2_sub)]
+
+
+# Calculate density for each sample (column-wise)
+#counts_density <- apply(log2(numeric_data), 2, density)
+# realized this data is already log cpm
+counts_density <- apply(numeric_data, 2, density)
+
+# Determine x and y limits across all samples
+xlim <- range(sapply(counts_density, function(d) d$x))
+ylim <- range(sapply(counts_density, function(d) d$y))
+
+# Assign colors to each sample
+cols <- rainbow(length(counts_density))
+ltys <- rep(1, length(counts_density))
+
+# Initialize an empty plot
+plot(counts_density[[1]], xlim=xlim, ylim=ylim, type="n",
+     xlab="log-CPM", ylab="Density",
+     main="Density Plot of log-CPM in PANC-1 RNA-seq",
+     cex.lab=0.85)
+
+# Add density curves for each sample
+for (i in 1:length(counts_density)) {
+  lines(counts_density[[i]], col=cols[i], lty=ltys[i])
+}
+
+# Add legend (using column names from numeric data)
+legend("topright",
+       legend=colnames(numeric_data),
+       col=cols, lty=ltys, cex=0.75, ncol=1,
+       border="blue", text.col="green4",
+       merge=TRUE, bg="gray90")
+```
+
+```{r}
+# taken from lecture5_normalization
+# using data from box above
+boxplot(numeric_data, xlab = "Samples", ylab = "log-CPM",
+        las = 2, cex = 0.75, cex.lab = 0.75,
+        cex.axis = 0.75, main = "Box Plot of PANC-1 RNA-seq")
+
+# median for each box
+abline(h = median(apply(numeric_data, 2, median)),
+       col = "purple", lwd = 1.0, lty = "dashed")
+```
+
+```{r}
+panc1Data <- panc1Data2
+```
+
+### Statistics About the Dataset
+**Number of rows:** `r nrow(panc1Data)`  
+**Number of Entrez IDs:** `r nrow(panc1Data) - nrow(panc1Data[panc1Data$EntrezID == "NA", ])`   
+**Number of Gene Names:** `r nrow(panc1Data) - nrow(panc1Data[panc1Data$Gene == "NA", ])`    
+
+### Other points to note:   
+* The sample labels (column names) are formatted the the following way "A_<NUM>_Panc1_<EXP>_<O2>" where <NUM> is the sample number, <EXP> is the experiment group either control siRNA (siCtrl) or SF3B1 targeting siRNA (siSF3B1), and <O2> is the oxygen level (Hx for hypoxia or 1%, and Nx for 21%). The original data file seems to only include 8 samples although the GSE201427 description states that there are 9. However, the missing sample seems to be **A_7_Panc1_siCtrl_Nx** which is not part of the experiment I will be focusing on so it is not an issue.
+* The values in the dataset is already in log-CPM
+
+```{r}
+# modified code from lecture 4 get the data 
+list_of_samples <- gse@gsms
+samples_type <- do.call(rbind, 
+                        lapply(list_of_samples,
+                               FUN = function(x){c(x@header$title, 
+                                                   x@header$characteristics_ch1)
+                                 }))
+colnames(samples_type) <- c("Sample Name", "Oxygen Exposure", 
+                            "siRNA Treatment", "Cell Line")
+
+samples_type[, "Oxygen Exposure"] <- gsub(samples_type[, "Oxygen Exposure"],
+                                          pattern = "condition: ",
+                                          replacement = "")
+
+samples_type[, "siRNA Treatment"] <- gsub(samples_type[, "siRNA Treatment"],
+                                          pattern = "treatment: ",
+                                          replacement = "")
+
+samples_type[, "Cell Line"] <- gsub(samples_type[, "Cell Line"],
+                                          pattern = "cell line: ",
+                                          replacement = "")
+
+samples_type <- as.data.frame(samples_type)
+```
+
+## 3 - Identifier mapping
+```{r eval=FALSE}
+# taking code from lecture 5 identifier mapping
+# BiocManager::install("biomaRt")
+library("biomaRt")
+biomaRt::listMarts()
+ensembl <- biomaRt::useMart("ensembl")
+# mart <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+biomaRt::listDatasets(ensembl) # need to use hsapiens_gene_ensembl
+mart <- biomaRt::useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+panc1_ids <- panc1Data[, 1]
+
+# conversion <- biomaRt::getBM(
+#     attributes = c("entrezgene_id", "hgnc_symbol"),
+#     filters = "entrezgene_id",
+#     values = panc1_ids,
+#     mart = mart
+# )
+# the code above errors, i think biomart only has 3794 entrez ids
+searchAttributes(mart=mart, "entrez")
+```
+```{r}
+# found new tool org.Hs.eg.db (annotation package)
+# BiocManager::install("org.Hs.eg.db")
+# https://bioconductor.org/packages/release/data/annotation/html/
+# docs: https://bioconductor.org/packages/release/data/annotation/manuals/org.Hs.eg.db/man/org.Hs.eg.db.pdf
+library("org.Hs.eg.db")
+# AnnotationDbi is a dependency of org.Hs.eg.db
+AnnotationDbi::keytypes(org.Hs.eg.db)
+AnnotationDbi::columns(org.Hs.eg.db)
+v_panc1_ids <- as.vector(panc1_ids)
+v_panc1_ids <- as.character(unlist(v_panc1_ids))
+mapped <- AnnotationDbi::select(org.Hs.eg.db, keys=v_panc1_ids, columns=c("ENTREZID", "SYMBOL"), keytype = "ENTREZID")
+
+nrow(mapped[mapped$SYMBOL == "NA", ]) # number of NA's from the mapping
+nrow(panc1Data[panc1Data$Gene == "NA", ]) # number of NA's from the original data 
+
+# check to see if there are things that can be supplemented
+joined <- cbind(mapped, panc1Data[, 2])
+nrow(joined[joined$Gene == "NA" & joined$SYMBOL == "NA", ])
+# this tells us that the original data set has more gene symbol names 
+# DECISION: NOT MAPPING
+```
+```{r}
+# removing all rows without hugo ids
+mapped_panc1Data <- panc1Data[panc1Data$Gene != "NA", ]
+geneCol <- mapped_panc1Data$Gene
+mapped_panc1Data <- mapped_panc1Data[, 3:length(mapped_panc1Data)]
+rownames(mapped_panc1Data) <- geneCol
+```
+
+
+## 4 - Cleaning the Data
+
+* min number of samples is 3
+
+```{r}
+# code taken from lecture 5 normalizing our dataset
+min_num_samples <- 3
+# removing log from data values 
+cpm_non_log <- 2^mapped_panc1Data
+data_matrix <- as.matrix(cpm_non_log)
+keep <- rowSums(data_matrix > 1) > min_num_samples
+filtered_data_matrix <- data_matrix[keep,]
+
+filtered_cpm_log2 <- log(filtered_data_matrix, base = 2)
+
+# Calculate density for each sample (column-wise)
+#counts_density <- apply(log2(numeric_data), 2, density)
+# realized this data is already log cpm
+counts_density <- apply(filtered_cpm_log2, 2, density)
+
+# Determine x and y limits across all samples
+xlim <- range(sapply(counts_density, function(d) d$x))
+ylim <- range(sapply(counts_density, function(d) d$y))
+
+# Assign colors to each sample
+cols <- rainbow(length(counts_density))
+ltys <- rep(1, length(counts_density))
+
+# Initialize an empty plot
+plot(counts_density[[1]], xlim=xlim, ylim=ylim, type="n",
+     xlab="log-CPM", ylab="Density",
+     main="Density Plot of log-CPM in filtered PANC-1 RNA-seq",
+     cex.lab=0.85)
+
+# Add density curves for each sample
+for (i in 1:length(counts_density)) {
+  lines(counts_density[[i]], col=cols[i], lty=ltys[i])
+}
+
+# Add legend (using column names from numeric data)
+legend("topright",
+       legend=colnames(numeric_data),
+       col=cols, lty=ltys, cex=0.75, ncol=1,
+       border="blue", text.col="black",
+       merge=TRUE, bg="gray90")
+
+```
+
+## 4 - Normalization
+
+*realizing now that the next portion only goes to CPM, which we already have so we might be able to omit
+
+to do
+* do the MDS plot
+* see if there is anything beyond that
+* see if i should use a diff normalization or if i can skip all together
+
+```{r}
+library("edgeR")
+
+# code taken from lecture 5 normalizing our dataset
+d <- edgeR::DGEList(counts=filtered_data_matrix, group=samples_type$"siRNA Treatment")
+d <- edgeR::calcNormFactors(d)
+normalized_counts <- cpm(d)
+
+log_new <- log(normalized_counts, base = 2)
+
+# Calculate density for each sample (column-wise)
+#counts_density <- apply(log2(numeric_data), 2, density)
+# realized this data is already log cpm
+counts_density <- apply(log_new, 2, density)
+
+# Determine x and y limits across all samples
+xlim <- range(sapply(counts_density, function(d) d$x))
+ylim <- range(sapply(counts_density, function(d) d$y))
+
+# Assign colors to each sample
+cols <- rainbow(length(counts_density))
+ltys <- rep(1, length(counts_density))
+
+# Initialize an empty plot
+plot(counts_density[[1]], xlim=xlim, ylim=ylim, type="n",
+     xlab="log-CPM", ylab="Density",
+     main="Density Plot of log-CPM in normalized PANC-1 RNA-seq",
+     cex.lab=0.85)
+
+# Add density curves for each sample
+for (i in 1:length(counts_density)) {
+  lines(counts_density[[i]], col=cols[i], lty=ltys[i])
+}
+
+# Add legend (using column names from numeric data)
+legend("topright",
+       legend=colnames(numeric_data),
+       col=cols, lty=ltys, cex=0.75, ncol=1,
+       border="blue", text.col="black",
+       merge=TRUE, bg="gray90")
+```

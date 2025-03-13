@@ -960,7 +960,7 @@ mappings. I first attempted this using the R package
 tested an alternative tool, the R annotation package
 <code>org.Hs.eg.db</code> <span class="citation">(<a href="#ref-converter">Carlson, 2024</a>)</span>.</p>
 <pre class="r"><code>if (!requireNamespace(&quot;org.Hs.eg.db&quot;, quietly = TRUE)) {
-  install.packages(&quot;org.Hs.eg.db&quot;)
+  BiocManager::install(&quot;org.Hs.eg.db&quot;)
 }
 
 library(&quot;org.Hs.eg.db&quot;)
